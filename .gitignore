@@ -1,0 +1,49 @@
+# Aider
+.aider*
+
+# Xcode
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Python build artifacts (venvstacks — these are large and regenerable)
+backend/packaging/_build/
+backend/packaging/_export/
+backend/packaging/_wheels/
+backend/packaging/_audio_wheels/
+backend/packaging/_platform_wheels/
+backend/packaging/_artifacts/
+backend/packaging/requirements/
+backend/packaging/_venvstacks_resolved.toml
+backend/packaging/dist/
+
+# DMG build output
+backend-wrapper/dist/
+
+# Temp build dirs
+/tmp/TxemAI-MLX-build/
+path/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# CocoaPods
+Pods/

@@ -1,0 +1,1 @@
+/Users/txema/Projects/IA/TxemAI-MLX/backend/packaging/dist/oMLX.app
