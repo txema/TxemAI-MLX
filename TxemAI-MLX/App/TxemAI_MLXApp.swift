@@ -6,7 +6,7 @@ struct TxemAI_MLXApp: App {
     @StateObject private var serverState = ServerStateViewModel.shared
 
     var body: some Scene {
-        WindowGroup("TxemAI MLX") {
+        WindowGroup("CortexML") {
             ContentView()
                 .environmentObject(serverState)
                 .onAppear {
