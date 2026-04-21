@@ -1,11 +1,16 @@
 import SwiftUI
 
 /// Full server configuration sheet.
-/// Covers: Server Mode (embedded/external), Memory, Cache, Generation Defaults, Auth.
+/// Covers: Appearance, Server Mode (embedded/external), Memory, Cache, Generation Defaults, Auth.
 /// POST /admin/api/global-settings for updates.
 struct GlobalSettingsView: View {
     var onSave: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.cortexTheme) private var t
+
+    // MARK: - Appearance
+
+    @AppStorage("cortex_accent") private var accentRaw: String = AccentPreset.emerald.rawValue
 
     // MARK: - Server mode
 
@@ -62,6 +67,8 @@ struct GlobalSettingsView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
+                        appearanceSection
+                        Divider()
                         serverModeSection
                         Divider()
 
@@ -112,6 +119,32 @@ struct GlobalSettingsView: View {
             Button("Clear", role: .destructive) { clearCache() }
         } message: {
             Text("This will delete all cached KV blocks from the SSD. Models will need to rebuild their cache on next use.")
+        }
+    }
+
+    // MARK: - Appearance section
+
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("APPEARANCE")
+
+            row("Accent Color") {
+                HStack(spacing: 10) {
+                    ForEach(AccentPreset.allCases, id: \.rawValue) { preset in
+                        AccentSwatch(
+                            preset: preset,
+                            isSelected: accentRaw == preset.rawValue
+                        ) {
+                            accentRaw = preset.rawValue
+                        }
+                    }
+                    Spacer()
+                }
+            }
+
+            Text("Accent color is applied across the entire app — buttons, active states, and charts.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -519,6 +552,38 @@ struct GlobalSettingsView: View {
                 await MainActor.run { statusMessage = "Clear failed: \(error.localizedDescription)" }
             }
         }
+    }
+}
+
+// MARK: - AccentSwatch
+
+private struct AccentSwatch: View {
+    let preset: AccentPreset
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            ZStack {
+                Circle()
+                    .fill(preset.color)
+                    .frame(width: 24, height: 24)
+                    .shadow(color: preset.color.opacity(isSelected ? 0.45 : 0), radius: 4)
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .overlay(
+                Circle()
+                    .stroke(isSelected ? preset.color : Color.clear, lineWidth: 2)
+                    .padding(-3)
+            )
+        }
+        .buttonStyle(.plain)
+        .help(preset.label)
     }
 }
 

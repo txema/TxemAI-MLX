@@ -61,5 +61,14 @@ struct ChatMessage: Identifiable, Sendable {
     var tokensPerSecond: Double? = nil     // filled after assistant response completes
     var durationSeconds: Double? = nil     // filled after assistant response completes
 
+    // Branch navigation — all versions stored here (oldest→newest).
+    // Empty means single version; ≥ 2 means branching has occurred.
+    // `content` always reflects `contentVariants[activeVariant]` when variants exist.
+    var contentVariants: [String] = []
+    var activeVariant: Int = 0
+
+    var hasBranches: Bool { contentVariants.count > 1 }
+    var totalVariants: Int { max(1, contentVariants.count) }
+
     enum Role: Sendable { case user, assistant, system }
 }
