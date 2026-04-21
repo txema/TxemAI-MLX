@@ -368,7 +368,10 @@ class APIClient {
     func streamChat(
         model: String,
         messages: [ChatMessage],
-        attachments: [AttachmentItem] = []
+        attachments: [AttachmentItem] = [],
+        temperature: Double? = nil,
+        topP: Double? = nil,
+        maxTokens: Int? = nil
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { (continuation: AsyncThrowingStream<String, Error>.Continuation) in
             let task = Task {
@@ -417,7 +420,10 @@ class APIClient {
                         }
                     }
 
-                    let body = FlexibleChatRequest(model: model, messages: requestMessages, stream: true)
+                    let body = FlexibleChatRequest(
+                        model: model, messages: requestMessages, stream: true,
+                        temperature: temperature, topP: topP, maxTokens: maxTokens
+                    )
                     request.httpBody = try JSONEncoder().encode(body)
 
                     let (bytes, response) = try await self.session.bytes(for: request)
@@ -546,6 +552,16 @@ private struct FlexibleChatRequest: Encodable {
     let model: String
     let messages: [ChatRequestMessage]
     let stream: Bool
+    let temperature: Double?
+    let topP: Double?
+    let maxTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case model, messages, stream
+        case temperature
+        case topP        = "top_p"
+        case maxTokens   = "max_tokens"
+    }
 }
 
 private enum ChatRequestMessage: Encodable {
