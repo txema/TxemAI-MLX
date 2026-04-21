@@ -40,7 +40,7 @@ struct ChatView: View {
     // Alerts
     @State private var showNoModelAlert: Bool = false
 
-    // New Phase-2 state
+    // Phase-2 state
     @State private var showParamsPanel: Bool = false
     @State private var showSearchBar: Bool = false
     @State private var showSystemPrompt: Bool = false
@@ -48,6 +48,10 @@ struct ChatView: View {
     @State private var temperature: Double = 0.7
     @State private var topP: Double = 0.9
     @State private var maxTokens: Int = 4096
+
+    // Phase-3 — inline edit state
+    @State private var editingMessageId: UUID? = nil
+    @State private var editText: String = ""
 
     // MARK: - Body
 
@@ -64,8 +68,16 @@ struct ChatView: View {
                     messageCount: messages.filter { $0.role != .system }.count,
                     totalTokens: estimatedTotalTokens,
                     contextUsed: estimatedTotalTokens,
-                    onFork: { /* Phase 3 */ },
-                    onRegenerate: { /* Phase 3 */ },
+                    onFork: {
+                        if let last = messages.last(where: { $0.role == .assistant }) {
+                            regenMessage(last)
+                        }
+                    },
+                    onRegenerate: {
+                        if let last = messages.last(where: { $0.role == .assistant }) {
+                            regenMessage(last)
+                        }
+                    },
                     onExportMD: exportChatAsMarkdown,
                     onClear: clearMessages
                 )
@@ -350,7 +362,13 @@ struct ChatView: View {
                 }
                 return ""
             },
-            set: { _ in /* Phase 3: editable system prompt */ }
+            set: { newValue in
+                guard let fId = currentSession?.folderId,
+                      let idx = store.folders.firstIndex(where: { $0.id == fId }) else { return }
+                var updated = store.folders[idx]
+                updated.settings.systemPrompt = newValue
+                store.save(folder: updated)
+            }
         )
     }
 
@@ -373,10 +391,19 @@ struct ChatView: View {
                             ChatBubble(
                                 message: msg,
                                 isThinking: isThinking,
-                                onCopy: { copyMessage(msg) },
-                                onFork: { /* Phase 3 */ },
-                                onRegen: { /* Phase 3 */ },
-                                onEdit: { /* Phase 3 */ }
+                                isEditing: editingMessageId == msg.id,
+                                editText: $editText,
+                                onCopy:   { copyMessage(msg) },
+                                onFork:   { regenMessage(msg) },
+                                onRegen:  { regenMessage(msg) },
+                                onEdit:   {
+                                    editText = msg.content
+                                    editingMessageId = msg.id
+                                },
+                                onEditSubmit:  { submitEdit() },
+                                onEditCancel:  { editingMessageId = nil },
+                                onPrevVariant: { navigateVariant(msg, delta: -1) },
+                                onNextVariant: { navigateVariant(msg, delta: +1) }
                             )
                             .id(msg.id)
                         }
@@ -570,6 +597,7 @@ struct ChatView: View {
     private func loadSession(_ session: ChatSession) {
         if currentSession != nil && !messages.isEmpty { saveCurrentSession() }
         currentSession = session
+        editingMessageId = nil
         messages = session.messages
             .filter { $0.role != "system" }
             .map { pm in
@@ -578,6 +606,8 @@ struct ChatView: View {
                 msg.durationSeconds = pm.durationSeconds
                 msg.imageData = pm.imageBase64.flatMap { Data(base64Encoded: $0) }
                 msg.textAttachmentNames = pm.textAttachmentNames
+                msg.contentVariants = pm.contentVariants
+                msg.activeVariant   = pm.activeVariant
                 return msg
             }
     }
@@ -605,7 +635,9 @@ struct ChatView: View {
             timestamp: Date(), tokensPerSecond: msg.tokensPerSecond,
             durationSeconds: msg.durationSeconds,
             imageBase64: msg.imageData?.base64EncodedString(),
-            textAttachmentNames: msg.textAttachmentNames
+            textAttachmentNames: msg.textAttachmentNames,
+            contentVariants: msg.contentVariants,
+            activeVariant: msg.activeVariant
         )
     }
 
@@ -698,19 +730,24 @@ struct ChatView: View {
         messages.append(userMsg)
         let assistant = ChatMessage(role: .assistant, content: "")
         messages.append(assistant)
-        let assistantId = assistant.id
-        isStreaming = true
         var apiMessages = Array(messages.dropLast())
-        if let fId = currentSession?.folderId,
-           let folder = store.folders.first(where: { $0.id == fId }),
-           !folder.settings.systemPrompt.isEmpty {
-            apiMessages.insert(ChatMessage(role: .system, content: folder.settings.systemPrompt), at: 0)
-        }
+        injectSystemPrompt(into: &apiMessages)
+        startStreaming(model: model, context: apiMessages,
+                       attachments: currentAttachments, assistantId: assistant.id)
+    }
+
+    // MARK: - Shared streaming engine
+
+    private func startStreaming(model: String,
+                                context: [ChatMessage],
+                                attachments: [AttachmentItem] = [],
+                                assistantId: UUID) {
+        isStreaming = true
         streamTask = Task {
             let start = Date(); var count = 0
             do {
                 for try await token in APIClient.shared.streamChat(
-                    model: model, messages: apiMessages, attachments: currentAttachments,
+                    model: model, messages: context, attachments: attachments,
                     temperature: temperature, topP: topP, maxTokens: maxTokens
                 ) {
                     if Task.isCancelled { break }
@@ -718,6 +755,10 @@ struct ChatView: View {
                     await MainActor.run {
                         if let idx = messages.firstIndex(where: { $0.id == assistantId }) {
                             messages[idx].content += token
+                            // Keep variants array in sync during branched streaming
+                            if !messages[idx].contentVariants.isEmpty {
+                                messages[idx].contentVariants[messages[idx].activeVariant] += token
+                            }
                         }
                     }
                 }
@@ -740,6 +781,92 @@ struct ChatView: View {
             }
             await MainActor.run { isStreaming = false }
         }
+    }
+
+    private func injectSystemPrompt(into msgs: inout [ChatMessage]) {
+        if let fId = currentSession?.folderId,
+           let folder = store.folders.first(where: { $0.id == fId }),
+           !folder.settings.systemPrompt.isEmpty {
+            msgs.insert(ChatMessage(role: .system, content: folder.settings.systemPrompt), at: 0)
+        }
+    }
+
+    // MARK: - Phase-3 Branch Operations
+
+    /// Regenerate / Fork: creates a new variant of an assistant message.
+    private func regenMessage(_ msg: ChatMessage) {
+        guard !isStreaming else { return }
+        guard let model = serverState.activeModelName else { showNoModelAlert = true; return }
+        guard let idx = messages.firstIndex(where: { $0.id == msg.id }),
+              messages[idx].role == .assistant else { return }
+
+        var m = messages[idx]
+        if m.contentVariants.isEmpty {
+            // First regen: seed variants with the original content
+            m.contentVariants = [m.content]
+            m.activeVariant   = 0
+        }
+        // Append new empty slot and make it active
+        m.contentVariants.append("")
+        m.activeVariant = m.contentVariants.count - 1
+        m.content = ""
+        m.tokensPerSecond = nil
+        m.durationSeconds = nil
+        messages[idx] = m
+        // Truncate continuation after this message
+        messages = Array(messages[...idx])
+
+        var context = Array(messages[..<idx])
+        injectSystemPrompt(into: &context)
+        startStreaming(model: model, context: context, assistantId: msg.id)
+    }
+
+    /// Edit a user message inline: saves old content as a variant, replaces content,
+    /// truncates continuation and re-generates.
+    private func submitEdit() {
+        guard let editId = editingMessageId,
+              let idx = messages.firstIndex(where: { $0.id == editId }) else {
+            editingMessageId = nil; return
+        }
+        guard let model = serverState.activeModelName else { showNoModelAlert = true; return }
+        let newContent = editText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newContent.isEmpty, newContent != messages[idx].content else {
+            editingMessageId = nil; return
+        }
+
+        var m = messages[idx]
+        if m.contentVariants.isEmpty {
+            m.contentVariants = [m.content]
+            m.activeVariant   = 0
+        }
+        m.contentVariants.append(newContent)
+        m.activeVariant = m.contentVariants.count - 1
+        m.content = newContent
+        messages[idx] = m
+        messages = Array(messages[...idx])
+        editingMessageId = nil
+
+        // Fresh assistant placeholder
+        let assistant = ChatMessage(role: .assistant, content: "")
+        messages.append(assistant)
+        var context = Array(messages.dropLast())
+        injectSystemPrompt(into: &context)
+        startStreaming(model: model, context: context, assistantId: assistant.id)
+    }
+
+    /// Navigate between message content variants (delta: -1 older, +1 newer).
+    private func navigateVariant(_ msg: ChatMessage, delta: Int) {
+        guard let idx = messages.firstIndex(where: { $0.id == msg.id }) else { return }
+        var m = messages[idx]
+        guard m.hasBranches else { return }
+        let newVariant = m.activeVariant + delta
+        guard newVariant >= 0 && newVariant < m.contentVariants.count else { return }
+        m.content       = m.contentVariants[newVariant]
+        m.activeVariant = newVariant
+        messages[idx]   = m
+        // Truncate continuation when switching variant
+        messages = Array(messages[...idx])
+        saveCurrentSession()
     }
 
     private func cancelStream() {
@@ -832,10 +959,64 @@ struct ChatView: View {
 struct ChatBubble: View {
     let message: ChatMessage
     var isThinking: Bool = false
-    var onCopy: () -> Void = {}
-    var onFork: () -> Void = {}
-    var onRegen: () -> Void = {}
-    var onEdit: () -> Void = {}
+    var isEditing: Bool = false
+    @Binding var editText: String
+    var onCopy:        () -> Void = {}
+    var onFork:        () -> Void = {}
+    var onRegen:       () -> Void = {}
+    var onEdit:        () -> Void = {}
+    var onEditSubmit:  () -> Void = {}
+    var onEditCancel:  () -> Void = {}
+    var onPrevVariant: () -> Void = {}
+    var onNextVariant: () -> Void = {}
+
+    // Convenience init — use when edit binding is not needed
+    init(message: ChatMessage,
+         isThinking: Bool = false,
+         onCopy: @escaping () -> Void = {},
+         onFork: @escaping () -> Void = {},
+         onRegen: @escaping () -> Void = {},
+         onEdit: @escaping () -> Void = {},
+         onPrevVariant: @escaping () -> Void = {},
+         onNextVariant: @escaping () -> Void = {}) {
+        self.message = message
+        self.isThinking = isThinking
+        self.isEditing = false
+        self._editText = .constant("")
+        self.onCopy = onCopy
+        self.onFork = onFork
+        self.onRegen = onRegen
+        self.onEdit = onEdit
+        self.onPrevVariant = onPrevVariant
+        self.onNextVariant = onNextVariant
+    }
+
+    // Full init — use from ChatView where edit state is managed
+    init(message: ChatMessage,
+         isThinking: Bool = false,
+         isEditing: Bool,
+         editText: Binding<String>,
+         onCopy:        @escaping () -> Void = {},
+         onFork:        @escaping () -> Void = {},
+         onRegen:       @escaping () -> Void = {},
+         onEdit:        @escaping () -> Void = {},
+         onEditSubmit:  @escaping () -> Void = {},
+         onEditCancel:  @escaping () -> Void = {},
+         onPrevVariant: @escaping () -> Void = {},
+         onNextVariant: @escaping () -> Void = {}) {
+        self.message = message
+        self.isThinking = isThinking
+        self.isEditing = isEditing
+        self._editText = editText
+        self.onCopy = onCopy
+        self.onFork = onFork
+        self.onRegen = onRegen
+        self.onEdit = onEdit
+        self.onEditSubmit = onEditSubmit
+        self.onEditCancel = onEditCancel
+        self.onPrevVariant = onPrevVariant
+        self.onNextVariant = onNextVariant
+    }
 
     @Environment(\.cortexTheme) private var t
     @State private var isHovered = false
@@ -843,11 +1024,11 @@ struct ChatBubble: View {
     var body: some View {
         VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 0) {
             switch message.role {
-            case .user:   userBubble
+            case .user:      userBubble
             case .assistant: assistantBubble
-            case .system: EmptyView()
+            case .system:    EmptyView()
             }
-            if isHovered && message.role != .system {
+            if (isHovered || isEditing) && message.role != .system {
                 messageFooter
                     .transition(.opacity)
             }
@@ -867,7 +1048,41 @@ struct ChatBubble: View {
                         .frame(maxHeight: 200)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
-                if !message.content.isEmpty {
+                if isEditing {
+                    // Inline edit editor
+                    VStack(alignment: .trailing, spacing: 4) {
+                        TextEditor(text: $editText)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(t.t1)
+                            .scrollContentBackground(.hidden)
+                            .background(Color.clear)
+                            .frame(minHeight: 32, maxHeight: 120)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(t.aL)
+                            .clipShape(UnevenRoundedRectangle(cornerRadii:
+                                .init(topLeading: 14, bottomLeading: 14, bottomTrailing: 4, topTrailing: 14)))
+                            .overlay(
+                                UnevenRoundedRectangle(cornerRadii:
+                                    .init(topLeading: 14, bottomLeading: 14, bottomTrailing: 4, topTrailing: 14))
+                                .stroke(t.accent.opacity(0.5), lineWidth: 1.5)
+                            )
+                        HStack(spacing: 6) {
+                            Button("Cancel", action: onEditCancel)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(t.t3)
+                                .buttonStyle(.plain)
+                            Button("Send", action: onEditSubmit)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(t.accent)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                .buttonStyle(.plain)
+                        }
+                    }
+                } else if !message.content.isEmpty {
                     Text(message.content)
                         .font(.system(size: 12.5, weight: .regular))
                         .foregroundStyle(t.accent)
@@ -955,17 +1170,58 @@ struct ChatBubble: View {
                         .font(.system(size: 9.5).monospacedDigit())
                         .foregroundStyle(t.t4)
                 }
+                // Branch nav
+                if message.hasBranches {
+                    branchNavControl
+                }
                 Spacer()
                 footerActionButton("⎇ Fork",  onFork)
                 footerActionButton("↺ Regen", onRegen)
                 footerActionButton("⎘ Copy",  onCopy)
             } else {
+                // Branch nav for user edits
+                if message.hasBranches {
+                    branchNavControl
+                }
                 Spacer()
-                footerActionButton("✎ Edit", onEdit)
+                if !isEditing {
+                    footerActionButton("✎ Edit", onEdit)
+                }
             }
         }
         .padding(.top, 4)
         .padding(.horizontal, message.role == .user ? 0 : 34)
+    }
+
+    @ViewBuilder
+    private var branchNavControl: some View {
+        HStack(spacing: 2) {
+            Button(action: onPrevVariant) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(message.activeVariant > 0 ? t.t3 : t.t5)
+            }
+            .buttonStyle(.plain)
+            .disabled(message.activeVariant == 0)
+
+            Text("\(message.activeVariant + 1) / \(message.totalVariants)")
+                .font(.system(size: 9.5).monospacedDigit())
+                .foregroundStyle(t.t3)
+                .frame(minWidth: 30)
+
+            Button(action: onNextVariant) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(message.activeVariant < message.totalVariants - 1 ? t.t3 : t.t5)
+            }
+            .buttonStyle(.plain)
+            .disabled(message.activeVariant >= message.totalVariants - 1)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background(t.btnBg)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(t.bd, lineWidth: 1))
     }
 
     @ViewBuilder

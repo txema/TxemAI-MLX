@@ -44,6 +44,11 @@ struct PersistedMessage: Identifiable, Codable, Equatable, Hashable {
     var imageBase64: String? = nil         // base64 encoded image data
     var textAttachmentNames: [String] = [] // filenames shown in user bubble
 
+    // Branch navigation — mirrors ChatMessage.contentVariants/activeVariant.
+    // Older JSON files without these keys decode cleanly via default values.
+    var contentVariants: [String] = []
+    var activeVariant: Int = 0
+
     static func == (lhs: PersistedMessage, rhs: PersistedMessage) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
