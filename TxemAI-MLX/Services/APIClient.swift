@@ -21,7 +21,7 @@ class APIClient {
         return d
     }()
 
-    var apiKey: String? = UserDefaults.standard.string(forKey: "omlx_api_key")
+    var apiKey: String? = UserDefaults.standard.string(forKey: "cortex_api_key")
     private var lastFetchedLastLogLine: String? = nil
 
     init(host: String = "localhost", port: Int = 8000) {

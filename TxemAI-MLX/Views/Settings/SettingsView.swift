@@ -3,7 +3,7 @@ import SwiftUI
 /// Pantalla de configuración inicial.
 /// Se muestra cuando no hay API key guardada.
 struct SettingsView: View {
-    @AppStorage("omlx_api_key") private var storedApiKey: String = ""
+    @AppStorage("cortex_api_key") private var storedApiKey: String = ""
     @State private var inputKey: String = ""
     @State private var showKey: Bool = false
     @State private var isConnecting: Bool = false
