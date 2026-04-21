@@ -1,103 +1,82 @@
 import SwiftUI
 
-/// Fila de 4 tarjetas de métricas siempre visibles en la parte superior del dashboard:
-/// throughput (t/s), memoria usada, requests activos, cache hit rate.
-struct MetricsRowView: View {
+// MARK: - MetricsGridView  (replaces MetricsRowView + SecondaryMetricsRowView)
+
+struct MetricsGridView: View {
     @EnvironmentObject var serverState: ServerStateViewModel
+    @Environment(\.cortexTheme) private var t
 
-    var body: some View {
-        HStack(spacing: 8) {
-            MetricCard(
-                label: "throughput",
-                value: String(format: "%.1f", serverState.metrics.tokensPerSecond),
-                unit: "t/s",
-                subtitle: "↑ generation"
-            )
-            MetricCard(
-                label: "memory used",
-                value: String(format: "%.0f", serverState.metrics.memoryUsedGB),
-                unit: "GB",
-                subtitle: "of \(String(format: "%.0f", serverState.metrics.memoryTotalGB)) GB"
-            )
-            MetricCard(
-                label: "active requests",
-                value: "\(serverState.metrics.activeRequests)",
-                unit: "",
-                subtitle: "\(serverState.metrics.queuedRequests) queued"
-            )
-            MetricCard(
-                label: "cache hit",
-                value: String(format: "%.0f", serverState.metrics.cacheHitPercent),
-                unit: "%",
-                subtitle: "KV hot tier"
-            )
-        }
+    private var m: ServerMetrics { serverState.metrics }
+
+    private var cacheEfficiency: Double {
+        m.totalPrefillTokens > 0
+            ? Double(m.cachedTokens) / Double(m.totalPrefillTokens) * 100
+            : 0
     }
-}
-
-/// Tarjeta individual de métrica.
-struct MetricCard: View {
-    let label: String
-    let value: String
-    let unit: String
-    let subtitle: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            HStack(alignment: .lastTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(.system(size: 22, weight: .medium))
-                if !unit.isEmpty {
-                    Text(unit)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
+        // 4-column × 2-row grid with 1px bd separators between cells
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                MetricTile(
+                    label: "THROUGHPUT",
+                    value: String(format: "%.1f", m.tokensPerSecond),
+                    unit: "t/s",
+                    sub: "↑ generation",
+                    hasRight: true, hasBottom: true
+                )
+                MetricTile(
+                    label: "MEMORY USED",
+                    value: String(format: "%.0f", m.memoryUsedGB),
+                    unit: "GB",
+                    sub: "of \(Int(m.memoryTotalGB)) GB total",
+                    hasRight: true, hasBottom: true
+                )
+                MetricTile(
+                    label: "ACTIVE REQ.",
+                    value: "\(m.activeRequests)",
+                    unit: "",
+                    sub: "\(m.queuedRequests) queued",
+                    hasRight: true, hasBottom: true
+                )
+                MetricTile(
+                    label: "CACHE HIT",
+                    value: String(format: "%.0f", m.cacheHitPercent * 100),
+                    unit: "%",
+                    sub: "KV hot tier",
+                    hasRight: false, hasBottom: true
+                )
             }
-            Text(subtitle)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(NSColor.controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-}
-
-// MARK: - Secondary metrics row (prefill tokens, cached tokens, cache efficiency, prompt t/s)
-
-struct SecondaryMetricsRowView: View {
-    @EnvironmentObject var serverState: ServerStateViewModel
-
-    var body: some View {
-        HStack(spacing: 8) {
-            MetricCard(
-                label: "prefill tokens",
-                value: formatCount(serverState.metrics.totalPrefillTokens),
-                unit: "",
-                subtitle: "total processed"
-            )
-            MetricCard(
-                label: "cached tokens",
-                value: formatCount(serverState.metrics.cachedTokens),
-                unit: "",
-                subtitle: "KV cache hits"
-            )
-            MetricCard(
-                label: "cache efficiency",
-                value: String(format: "%.0f", serverState.metrics.cacheHitPercent),
-                unit: "%",
-                subtitle: "reuse rate"
-            )
-            MetricCard(
-                label: "prompt t/s",
-                value: String(format: "%.1f", serverState.metrics.promptProcessingTps),
-                unit: "t/s",
-                subtitle: "prefill speed"
-            )
+            HStack(spacing: 0) {
+                MetricTile(
+                    label: "PREFILL TOKENS",
+                    value: formatCount(m.totalPrefillTokens),
+                    unit: "",
+                    sub: "total processed",
+                    hasRight: true, hasBottom: false
+                )
+                MetricTile(
+                    label: "CACHED TOKENS",
+                    value: formatCount(m.cachedTokens),
+                    unit: "",
+                    sub: "KV cache hits",
+                    hasRight: true, hasBottom: false
+                )
+                MetricTile(
+                    label: "CACHE EFFIC.",
+                    value: String(format: "%.0f", cacheEfficiency),
+                    unit: "%",
+                    sub: "reuse rate",
+                    hasRight: true, hasBottom: false
+                )
+                MetricTile(
+                    label: "PROMPT SPEED",
+                    value: String(format: "%.0f", m.promptProcessingTps),
+                    unit: "t/s",
+                    sub: "prefill speed",
+                    hasRight: false, hasBottom: false
+                )
+            }
         }
     }
 
@@ -108,9 +87,61 @@ struct SecondaryMetricsRowView: View {
     }
 }
 
+// MARK: - MetricTile
+
+private struct MetricTile: View {
+    let label: String
+    let value: String
+    let unit: String
+    let sub: String
+    let hasRight: Bool
+    let hasBottom: Bool
+
+    @Environment(\.cortexTheme) private var t
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 9.5, weight: .medium))
+                .tracking(0.07 * 9.5)
+                .foregroundStyle(t.lbl)
+                .lineLimit(1)
+
+            HStack(alignment: .lastTextBaseline, spacing: 3) {
+                Text(value)
+                    .font(.system(size: 21, weight: .heavy).monospacedDigit())
+                    .foregroundStyle(t.t1)
+                if !unit.isEmpty {
+                    Text(unit)
+                        .font(.system(size: 11))
+                        .foregroundStyle(t.lbl)
+                }
+            }
+
+            Text(sub)
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundStyle(t.t4)
+        }
+        .padding(.vertical, 11)
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Right border
+        .overlay(alignment: .trailing) {
+            if hasRight {
+                Rectangle().fill(t.bd).frame(width: 1)
+            }
+        }
+        // Bottom border
+        .overlay(alignment: .bottom) {
+            if hasBottom {
+                Rectangle().fill(t.bd).frame(height: 1)
+            }
+        }
+    }
+}
+
 #Preview {
-    MetricsRowView()
+    MetricsGridView()
         .environmentObject(ServerStateViewModel())
-        .padding()
-        .frame(width: 700)
+        .frame(width: 468)
 }

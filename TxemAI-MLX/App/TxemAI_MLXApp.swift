@@ -1,26 +1,30 @@
 import SwiftUI
 
 @main
-struct TxemAI_MLXApp: App {
+struct CortexMLApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var serverState = ServerStateViewModel.shared
 
     var body: some Scene {
         WindowGroup("CortexML") {
-            ContentView()
-                .environmentObject(serverState)
-                .onAppear {
-                    appDelegate.setServerState(serverState)
-                }
+            ThemeProvider {
+                ContentView()
+                    .environmentObject(serverState)
+                    .onAppear {
+                        appDelegate.setServerState(serverState)
+                    }
+            }
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
-        .defaultSize(width: 960, height: 620)
+        .defaultSize(width: 660, height: 720)
 
         WindowGroup("Chat", id: "chat") {
-            ChatView()
-                .environmentObject(serverState)
+            ThemeProvider {
+                ChatView()
+                    .environmentObject(serverState)
+            }
         }
-        .defaultSize(width: 700, height: 500)
+        .defaultSize(width: 520, height: 720)
     }
 }

@@ -279,7 +279,7 @@ struct GlobalSettingsView: View {
         if embeddedServerRunning {
             serverManager.stop()
         } else {
-            let apiKey = UserDefaults.standard.string(forKey: "omlx_api_key") ?? ""
+            let apiKey = UserDefaults.standard.string(forKey: "cortex_api_key") ?? ""
             Task {
                 try? await serverManager.start(port: 8000, apiKey: apiKey)
             }
@@ -435,7 +435,7 @@ struct GlobalSettingsView: View {
     private func load() async {
         isLoading = true
         // Always populate API key from local storage regardless of mode
-        apiKey = UserDefaults.standard.string(forKey: "omlx_api_key") ?? ""
+        apiKey = UserDefaults.standard.string(forKey: "cortex_api_key") ?? ""
 
         if serverMode == "external" {
             do {
@@ -466,7 +466,7 @@ struct GlobalSettingsView: View {
 
         // Always persist API key locally before any network call
         if !apiKey.isEmpty {
-            UserDefaults.standard.set(apiKey, forKey: "omlx_api_key")
+            UserDefaults.standard.set(apiKey, forKey: "cortex_api_key")
             APIClient.shared.apiKey = apiKey
         }
 
