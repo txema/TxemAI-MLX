@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct TxemAI_MLXApp: App {
+struct CortexMLApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var serverState = ServerStateViewModel.shared
 
