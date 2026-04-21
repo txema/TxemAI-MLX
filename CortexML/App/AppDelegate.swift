@@ -155,7 +155,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        menu.addItem(action("Open TxemAI MLX",     #selector(openMainWindowAction)))
+        menu.addItem(action("Open CortexML",          #selector(openMainWindowAction)))
         menu.addItem(.separator())
 
         let quitItem = action("Quit",              #selector(quitAction))
@@ -178,7 +178,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Action Handlers
 
     @objc private func startServerAction() {
-        let apiKey = UserDefaults.standard.string(forKey: "omlx_api_key") ?? ""
+        let apiKey = UserDefaults.standard.string(forKey: "cortex_api_key") ?? ""
         Task {
             try? await ServerManager.shared.start(apiKey: apiKey)
         }

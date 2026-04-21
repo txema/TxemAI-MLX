@@ -1,33 +1,43 @@
 import SwiftUI
 
-/// Dashboard principal. Muestra en una sola vista:
-/// - Fila de métricas (throughput, memoria, requests, cache hit)
-/// - Sparklines de t/s y memoria en tiempo real
-/// - Panel de logs en vivo con filtros
+// MARK: - DashboardView
+
+/// Main content area: metrics grid → throughput chart → cache tier bar → server log.
 struct DashboardView: View {
     @EnvironmentObject var serverState: ServerStateViewModel
+    @Environment(\.cortexTheme) private var t
 
     var body: some View {
         VStack(spacing: 0) {
-            MetricsRowView()
-                .padding(12)
+            // 1 · 8-tile metrics grid (4 × 2)
+            MetricsGridView()
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(t.bd).frame(height: 1)
+                }
 
-            SecondaryMetricsRowView()
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+            // 2 · Throughput area chart
+            ThroughputChartView()
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(t.bd).frame(height: 1)
+                }
 
-            SparklineRowView()
-                .padding(.horizontal, 12)
+            // 3 · Cache tier bar
+            CacheTierBarView()
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(t.bd).frame(height: 1)
+                }
 
+            // 4 · Server log (fills remaining space)
             LogsView()
-                .padding(12)
+                .frame(maxHeight: .infinity)
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(t.win)
+        .frame(minWidth: 468, minHeight: 560)
     }
 }
 
 #Preview {
     DashboardView()
         .environmentObject(ServerStateViewModel())
-        .frame(width: 700, height: 500)
+        .frame(width: 468, height: 580)
 }

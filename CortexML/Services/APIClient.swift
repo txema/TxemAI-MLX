@@ -21,7 +21,7 @@ class APIClient {
         return d
     }()
 
-    var apiKey: String? = UserDefaults.standard.string(forKey: "omlx_api_key")
+    var apiKey: String? = UserDefaults.standard.string(forKey: "cortex_api_key")
     private var lastFetchedLastLogLine: String? = nil
 
     init(host: String = "localhost", port: Int = 8000) {
@@ -368,7 +368,10 @@ class APIClient {
     func streamChat(
         model: String,
         messages: [ChatMessage],
-        attachments: [AttachmentItem] = []
+        attachments: [AttachmentItem] = [],
+        temperature: Double? = nil,
+        topP: Double? = nil,
+        maxTokens: Int? = nil
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { (continuation: AsyncThrowingStream<String, Error>.Continuation) in
             let task = Task {
@@ -417,7 +420,10 @@ class APIClient {
                         }
                     }
 
-                    let body = FlexibleChatRequest(model: model, messages: requestMessages, stream: true)
+                    let body = FlexibleChatRequest(
+                        model: model, messages: requestMessages, stream: true,
+                        temperature: temperature, topP: topP, maxTokens: maxTokens
+                    )
                     request.httpBody = try JSONEncoder().encode(body)
 
                     let (bytes, response) = try await self.session.bytes(for: request)
@@ -546,6 +552,16 @@ private struct FlexibleChatRequest: Encodable {
     let model: String
     let messages: [ChatRequestMessage]
     let stream: Bool
+    let temperature: Double?
+    let topP: Double?
+    let maxTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case model, messages, stream
+        case temperature
+        case topP        = "top_p"
+        case maxTokens   = "max_tokens"
+    }
 }
 
 private enum ChatRequestMessage: Encodable {

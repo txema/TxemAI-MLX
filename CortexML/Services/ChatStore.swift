@@ -19,16 +19,28 @@ class ChatStore: ObservableObject {
     private let baseURL: URL
     
     init() {
-        let documentsPath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".txemai-mlx")
-        self.baseURL = documentsPath
-        
-        // Ensure directories exist
-        try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let newURL = home.appendingPathComponent(".cortexml")
+        let oldURL = home.appendingPathComponent(".txemai-mlx")
+        let fm = FileManager.default
+
+        // Migrate existing data from the old directory on first launch
+        if fm.fileExists(atPath: oldURL.path) && !fm.fileExists(atPath: newURL.path) {
+            try? fm.moveItem(at: oldURL, to: newURL)
+        }
+
+        self.baseURL = newURL
+
+        try? fm.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        try? fm.createDirectory(
             at: baseURL.appendingPathComponent("chats"),
             withIntermediateDirectories: true
         )
-        
+        try? fm.createDirectory(
+            at: baseURL.appendingPathComponent("avatars"),
+            withIntermediateDirectories: true
+        )
+
         load()
     }
 

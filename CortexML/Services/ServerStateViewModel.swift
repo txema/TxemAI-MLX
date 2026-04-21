@@ -25,6 +25,11 @@ class ServerStateViewModel: ObservableObject {
     @Published var metricsHistory: [ServerMetrics] = []
     private let historyMaxLength = 60
 
+    /// Last 24 throughput readings for the throughput area chart.
+    var throughputHistory: [Double] {
+        metricsHistory.suffix(24).map(\.tokensPerSecond)
+    }
+
     // MARK: - Logs
     @Published var logs: [LogEntry] = []
 
@@ -67,7 +72,7 @@ class ServerStateViewModel: ObservableObject {
         }
 
         // External mode: require API key before connecting
-        let savedKey = UserDefaults.standard.string(forKey: "omlx_api_key") ?? ""
+        let savedKey = UserDefaults.standard.string(forKey: "cortex_api_key") ?? ""
         if savedKey.isEmpty {
             connectionState = .needsApiKey
             return
