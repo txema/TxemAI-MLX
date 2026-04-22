@@ -35,13 +35,18 @@ struct ContentView: View {
                 }
                 .help("Chat")
             }
-            if case .running = voiceManager.state {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { showVoiceStudio = true } label: {
-                        Image(systemName: "mic.fill")
+            ToolbarItem(placement: .primaryAction) {
+                Button { showVoiceStudio = true } label: {
+                    switch voiceManager.state {
+                    case .running:
+                        Image(systemName: "mic.fill").foregroundStyle(.blue)
+                    case .starting:
+                        Image(systemName: "mic").foregroundStyle(.orange)
+                    default:
+                        Image(systemName: "mic").foregroundStyle(.secondary)
                     }
-                    .help("Voice Studio")
                 }
+                .help("Voice Studio")
             }
             ToolbarItem(placement: .primaryAction) {
                 Button { showBenchmark = true } label: {

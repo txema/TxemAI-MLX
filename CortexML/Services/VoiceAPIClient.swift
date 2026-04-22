@@ -119,31 +119,26 @@ final class VoiceAPIClient {
         let (data, response) = try await session.data(for: req)
         try checkStatus(response, data: data)
 
-        struct AvailableEffectsResponse: Decodable {
-            struct AvailableEffect: Decodable {
-                let type: String
-                let defaultParams: [String: Double]?
-                enum CodingKeys: String, CodingKey {
-                    case type
-                    case defaultParams = "default_params"
-                }
-            }
-            let effects: [AvailableEffect]
-        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let effects = json["effects"] as? [[String: Any]] else { return [] }
 
-        let envelope = try decoder.decode(AvailableEffectsResponse.self, from: data)
-        return envelope.effects.map { e in
-            VoiceEffect(type: e.type, params: e.defaultParams ?? [:])
+        return effects.compactMap { dict in
+            guard let type = dict["type"] as? String else { return nil }
+            return VoiceEffect(type: type, params: [:])
         }
     }
 
     // MARK: - Model status
 
+    private struct ModelStatusResponse: Decodable {
+        let models: [VoiceModelStatus]
+    }
+
     func fetchModelStatus() async throws -> [VoiceModelStatus] {
         let req = URLRequest(url: baseURL.appendingPathComponent("models/status"))
         let (data, response) = try await session.data(for: req)
         try checkStatus(response, data: data)
-        return try decoder.decode([VoiceModelStatus].self, from: data)
+        return try decoder.decode(ModelStatusResponse.self, from: data).models
     }
 
     func downloadModel(name: String) async throws {
