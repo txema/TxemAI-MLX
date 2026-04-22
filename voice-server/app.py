@@ -20,7 +20,7 @@ from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -109,12 +109,42 @@ AVAILABLE_MODELS = [
 _tts_model = None
 _tts_model_size = None
 
+def _is_model_downloaded(model_name: str) -> bool:
+    """Verifica si un modelo está descargado en la caché."""
+    from huggingface_hub import constants as hf_constants
+    cache_dir = Path(hf_constants.HF_HUB_CACHE)
+    repo_id = None
+    
+    for m in AVAILABLE_MODELS:
+        if m["model_name"] == model_name:
+            repo_id = m["hf_repo_id"]
+            break
+    
+    if not repo_id:
+        return False
+        
+    repo_dir = cache_dir / ("models--" + repo_id.replace("/", "--"))
+    return repo_dir.exists() and any(repo_dir.rglob("*.safetensors"))
+
 def get_tts_model(model_size: str = "1.7B"):
     global _tts_model, _tts_model_size
     if _tts_model is None or _tts_model_size != model_size:
+        # Determinar el nombre del modelo para verificar descarga
+        repo_id = QWEN_TTS_REPOS.get(model_size, QWEN_TTS_REPOS["1.7B"])
+        model_name = None
+        for name, rid in QWEN_TTS_REPOS.items():
+            if rid == repo_id:
+                model_name = f"qwen3-tts-{name.replace('1.7b', '1.7B').replace('0.6b', '0.6B')}"
+                break
+        
+        if model_name and not _is_model_downloaded(model_name):
+            raise HTTPException(
+                status_code=428,
+                detail=f"Model {model_name} not downloaded. Please download first."
+            )
+            
         logger.info(f"Loading Qwen3-TTS {model_size}...")
         from mlx_audio.tts.utils import load_model
-        repo_id = QWEN_TTS_REPOS.get(model_size, QWEN_TTS_REPOS["1.7B"])
         _tts_model = load_model(repo_id)
         _tts_model_size = model_size
         logger.info(f"Qwen3-TTS {model_size} loaded. sample_rate={_tts_model.sample_rate}")
@@ -306,6 +336,8 @@ async def generate_stream(data: GenerateRequest):
             headers={"Content-Disposition": 'attachment; filename="speech.wav"'},
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"TTS generation failed: {e}")
         import traceback; traceback.print_exc()
