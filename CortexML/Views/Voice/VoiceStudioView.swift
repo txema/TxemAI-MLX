@@ -58,7 +58,24 @@ struct VoiceStudioView: View {
         }
         .background(t.win)
         .task { await loadData() }
-        .sheet(isPresented: $showNewProfileSheet) { newProfileSheet }
+        .sheet(isPresented: $showNewProfileSheet) {
+        NewVoiceProfileSheet { profile in
+            guard case .running = voiceManager.state else {
+                errorMessage = "Voice server is not running. Start it first."
+                return
+            }
+            Task {
+                do {
+                    let created = try await VoiceAPIClient.shared.createProfile(profile)
+                    profiles.append(created)
+                    selectedProfile = created
+                    showNewProfileSheet = false
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
         .alert("Voice Error", isPresented: .constant(errorMessage != nil), actions: {
             Button("OK") { errorMessage = nil }
         }, message: {
@@ -509,7 +526,6 @@ struct VoiceStudioView: View {
     }
 
     private func loadProfiles() async {
-        guard case .running = voiceManager.state else { return }
         do { profiles = try await VoiceAPIClient.shared.fetchProfiles() } catch {}
     }
 

@@ -142,10 +142,8 @@ final class VoiceAPIClient {
     }
 
     func downloadModel(name: String) async throws {
-        var req = URLRequest(url: baseURL.appendingPathComponent("models/download"))
+        var req = URLRequest(url: baseURL.appendingPathComponent("models/\(name)/download"))
         req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: ["model_name": name])
         let (data, response) = try await session.data(for: req)
         try checkStatus(response, data: data)
     }

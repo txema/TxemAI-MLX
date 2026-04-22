@@ -183,21 +183,23 @@ def _is_model_downloaded(model_name: str) -> bool:
     repo_dir = cache_dir / ("models--" + repo_id.replace("/", "--"))
     return repo_dir.exists() and any(repo_dir.rglob("*.safetensors"))
 
+def _model_name_for_size(model_size: str) -> str:
+    """Devuelve el model_name de AVAILABLE_MODELS para un model_size dado."""
+    size_to_name = {
+        "0.6B": "qwen3-tts-0.6b",
+        "1.7B": "qwen3-tts-1.7b",
+        "1.7B-voice": "qwen3-tts-1.7b-voice",
+    }
+    return size_to_name.get(model_size, "qwen3-tts-1.7b")
+
 def get_tts_model(model_size: str = "1.7B"):
     global _tts_model, _tts_model_size
     if _tts_model is None or _tts_model_size != model_size:
-        # Determinar el nombre del modelo para verificar descarga
-        repo_id = QWEN_TTS_REPOS.get(model_size, QWEN_TTS_REPOS["1.7B"])
-        model_name = None
-        for name, rid in QWEN_TTS_REPOS.items():
-            if rid == repo_id:
-                model_name = f"qwen3-tts-{name.replace('1.7b', '1.7B').replace('0.6b', '0.6B')}"
-                break
-        
-        if model_name and not _is_model_downloaded(model_name):
+        model_name = _model_name_for_size(model_size)
+        if not _is_model_downloaded(model_name):
             raise HTTPException(
                 status_code=428,
-                detail=f"Model {model_name} not downloaded. Please download first."
+                detail=f"Model {model_name} not downloaded. Please download it first from Voice Studio → Models."
             )
             
         logger.info(f"Loading Qwen3-TTS {model_size}...")
