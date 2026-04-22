@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -236,6 +237,36 @@ async def download_model(name: str):
     # Iniciar descarga
     download_id = _start_download(name)
     return {"status": "started", "download_id": download_id}
+
+@app.get("/models/{name}/download/progress")
+async def download_progress(name: str):
+    """Devuelve progreso de descarga en tiempo real (SSE)."""
+    if name not in _downloads:
+        # Si no hay descarga activa, devolver estado final
+        if _is_model_downloaded(name):
+            async def already_done():
+                yield "data: {\"status\": \"completed\", \"progress\": 1.0}\n\n"
+            return StreamingResponse(already_done(), media_type="text/event-stream")
+        else:
+            raise HTTPException(status_code=404, detail="No active download for this model")
+
+    async def progress_stream():
+        while True:
+            status = _downloads.get(name)
+            if not status:
+                # Descarga terminada o fallida (limpiado en _start_download)
+                break
+            if status["status"] == "completed":
+                yield f"data: {{\"download_id\": \"{status['download_id']}\", \"status\": \"completed\", \"progress\": 1.0}}\n\n"
+                break
+            elif status["status"] == "failed":
+                yield f"data: {{\"download_id\": \"{status['download_id']}\", \"status\": \"failed\", \"error\": \"{status.get('error', 'Unknown error')}\"}}\n\n"
+                break
+            else:
+                yield f"data: {{\"download_id\": \"{status['download_id']}\", \"status\": \"downloading\", \"progress\": {status['progress']:.4f}}}\n\n"
+            await asyncio.sleep(0.5)  # Actualizar cada 500ms
+
+    return StreamingResponse(progress_stream(), media_type="text/event-stream")
 
 @app.on_event("startup")
 async def startup():
