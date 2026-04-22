@@ -190,6 +190,7 @@ struct ModelCardView: View {
         .padding(.horizontal, 8)
         .padding(.top, 8)
         .padding(.bottom, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             Group {
                 if isLoaded {
