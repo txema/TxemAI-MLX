@@ -272,6 +272,7 @@
 				INFOPLIST_KEY_NSAppDataUsageDescription = "";
 				INFOPLIST_KEY_NSFileProviderDomainUsageDescription = "";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "CortexML needs microphone access for voice input in chat.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -307,6 +308,7 @@
 				INFOPLIST_KEY_NSAppDataUsageDescription = "";
 				INFOPLIST_KEY_NSFileProviderDomainUsageDescription = "";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "CortexML needs microphone access for voice input in chat.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

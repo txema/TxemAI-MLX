@@ -1,12 +1,14 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import MarkdownUI
+import AVFoundation
 
 // MARK: - ChatView
 
 struct ChatView: View {
     @EnvironmentObject var serverState: ServerStateViewModel
     @ObservedObject private var store = ChatStore.shared
+    @ObservedObject private var voiceManager = VoiceManager.shared
     @Environment(\.cortexTheme) private var t
 
     // Session state
@@ -53,6 +55,15 @@ struct ChatView: View {
     @State private var editingMessageId: UUID? = nil
     @State private var editText: String = ""
 
+    // Voice state
+    @AppStorage("voiceAutoSpeak") private var voiceAutoSpeak: Bool = false
+    @AppStorage("selectedVoiceProfileId") private var selectedVoiceProfileId: String = ""
+    @State private var voiceProfiles: [VoiceProfile] = []
+    @State private var audioPlayer: AVAudioPlayer?
+    @State private var isRecording: Bool = false
+    @State private var audioRecorder: AVAudioRecorder?
+    @State private var recordingURL: URL?
+
     // MARK: - Body
 
     var body: some View {
@@ -91,6 +102,16 @@ struct ChatView: View {
             Text("Load a model in the sidebar before starting a chat.")
         }
         .onDisappear { streamTask?.cancel() }
+        .task {
+            if case .running = voiceManager.state {
+                voiceProfiles = (try? await VoiceAPIClient.shared.fetchProfiles()) ?? []
+            }
+        }
+        .onChange(of: voiceManager.state) {
+            if case .running = voiceManager.state {
+                Task { voiceProfiles = (try? await VoiceAPIClient.shared.fetchProfiles()) ?? [] }
+            }
+        }
         .sheet(isPresented: $showingFoldersSheet) { FoldersManagerView() }
         .sheet(item: $selectedFolderForSettings) { folder in
             FolderSettingsSheet(folder: folder)
@@ -259,6 +280,27 @@ struct ChatView: View {
                 Text("\(estimatedTotalTokens) tokens")
                     .font(.system(size: 10).monospacedDigit())
                     .foregroundStyle(t.t4)
+            }
+            // Voice controls (only when voice server is running)
+            if case .running = voiceManager.state {
+                if !voiceProfiles.isEmpty {
+                    Picker("", selection: $selectedVoiceProfileId) {
+                        Text("No voice").tag("")
+                        ForEach(voiceProfiles) { p in
+                            Text(p.name).tag(p.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 110)
+                    .help("Active voice profile")
+                }
+                Toggle(isOn: $voiceAutoSpeak) {
+                    Image(systemName: "speaker.wave.2")
+                        .font(.system(size: 11))
+                        .foregroundStyle(voiceAutoSpeak ? t.accent : t.t3)
+                }
+                .toggleStyle(.button)
+                .help("Auto-speak responses")
             }
             // Toolbar buttons
             toolbarButton("magnifyingglass") { withAnimation(.easeInOut(duration: 0.15)) { showSearchBar.toggle() } }
@@ -516,6 +558,20 @@ struct ChatView: View {
                             .disabled(isStreaming)
                     }
 
+                    // Microphone button (voice input, visible when voice server is running)
+                    if case .running = voiceManager.state {
+                        Button {
+                            if isRecording { stopRecordingAndTranscribe() } else { startRecording() }
+                        } label: {
+                            Image(systemName: isRecording ? "stop.circle.fill" : "mic")
+                                .font(.system(size: 14))
+                                .foregroundStyle(isRecording ? .red : t.t4)
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .help(isRecording ? "Stop and transcribe" : "Voice input")
+                    }
+
                     // Send / Stop button
                     Button {
                         if isStreaming { cancelStream() } else { sendMessage() }
@@ -771,6 +827,15 @@ struct ChatView: View {
                     }
                 }
                 saveCurrentSession()
+                // Auto-speak the response if enabled and voice server is running
+                await MainActor.run {
+                    if voiceAutoSpeak, !selectedVoiceProfileId.isEmpty,
+                       case .running = voiceManager.state,
+                       let idx = messages.firstIndex(where: { $0.id == assistantId }),
+                       !messages[idx].content.isEmpty {
+                        Task { await speakText(messages[idx].content, profileId: selectedVoiceProfileId) }
+                    }
+                }
             } catch {
                 await MainActor.run {
                     if let idx = messages.firstIndex(where: { $0.id == assistantId }),
@@ -951,6 +1016,63 @@ struct ChatView: View {
     }
     private func stringFromRole(_ r: ChatMessage.Role) -> String {
         switch r { case .user: "user"; case .assistant: "assistant"; case .system: "system" }
+    }
+
+    // MARK: - Voice helpers
+
+    private func speakText(_ text: String, profileId: String) async {
+        guard !profileId.isEmpty else { return }
+        do {
+            let data = try await VoiceAPIClient.shared.generateSpeech(
+                text: text, profileId: profileId
+            )
+            let player = try AVAudioPlayer(data: data)
+            audioPlayer = player
+            player.play()
+        } catch {}
+    }
+
+    private func startRecording() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cortex_voice_input_\(UUID().uuidString).wav")
+        recordingURL = url
+
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: 16000.0,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+        ]
+
+        do {
+            audioRecorder = try AVAudioRecorder(url: url, settings: settings)
+            audioRecorder?.record()
+            isRecording = true
+        } catch {}
+    }
+
+    private func stopRecordingAndTranscribe() {
+        audioRecorder?.stop()
+        audioRecorder = nil
+        isRecording = false
+
+        guard let url = recordingURL,
+              let data = try? Data(contentsOf: url) else { return }
+
+        Task {
+            do {
+                let text = try await VoiceAPIClient.shared.transcribeAudio(audioData: data, language: nil)
+                await MainActor.run {
+                    if inputText.isEmpty {
+                        inputText = text
+                    } else {
+                        inputText += " " + text
+                    }
+                }
+            } catch {}
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 }
 

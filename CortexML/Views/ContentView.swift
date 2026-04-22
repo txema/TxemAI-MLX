@@ -3,10 +3,12 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var serverState: ServerStateViewModel
     @ObservedObject private var serverManager = ServerManager.shared
+    @ObservedObject private var voiceManager = VoiceManager.shared
     @AppStorage("serverMode") private var serverMode: String = "embedded"
     @State private var showSettings: Bool = false
     @State private var showBenchmark: Bool = false
     @State private var showGlobalSettings: Bool = false
+    @State private var showVoiceStudio: Bool = false
     @Environment(\.openWindow) private var openWindow
     @Environment(\.cortexTheme) private var t
 
@@ -33,6 +35,14 @@ struct ContentView: View {
                 }
                 .help("Chat")
             }
+            if case .running = voiceManager.state {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showVoiceStudio = true } label: {
+                        Image(systemName: "mic.fill")
+                    }
+                    .help("Voice Studio")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button { showBenchmark = true } label: {
                     Image(systemName: "speedometer")
@@ -54,6 +64,10 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView { serverState.reconnect() }
+        }
+        .sheet(isPresented: $showVoiceStudio) {
+            VoiceStudioView()
+                .frame(minWidth: 700, minHeight: 500)
         }
         .onAppear {
             if serverState.connectionState == .needsApiKey { showSettings = true }
