@@ -47,3 +47,5 @@ path/
 
 # CocoaPods
 Pods/
+.claude/
+.plandex-v2/
