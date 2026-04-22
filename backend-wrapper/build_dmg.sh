@@ -8,11 +8,11 @@ set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WRAPPER_DIR="$REPO_ROOT/backend-wrapper"
 OMLX_DIST="$REPO_ROOT/backend/packaging/dist/oMLX.app/Contents"
-BUILD_DIR="/tmp/TxemAI-MLX-build"
-APP_SRC="$BUILD_DIR/Build/Products/Release/TxemAI-MLX.app"
+BUILD_DIR="/tmp/CortexML-build"
+APP_SRC="$BUILD_DIR/Build/Products/Release/CortexML.app"
 DIST_DIR="$WRAPPER_DIR/dist"
 DMG_STAGING="$DIST_DIR/_staging"
-DMG_OUT="$DIST_DIR/TxemAI-MLX.dmg"
+DMG_OUT="$DIST_DIR/CortexML.dmg"
 
 # ── Preflight ────────────────────────────────────────────────────────────────
 
@@ -40,11 +40,11 @@ echo "  ✓ All prerequisites found."
 # ── Step 1 — xcodebuild Release (no signing — we sign manually after embed) ──
 
 echo ""
-echo "▶ Step 1 — Building TxemAI-MLX (Release)…"
+echo "▶ Step 1 — Building CortexML (Release)…"
 
 xcodebuild \
-    -project "$REPO_ROOT/TxemAI-MLX.xcodeproj" \
-    -scheme "TxemAI-MLX" \
+    -project "$REPO_ROOT/CortexML.xcodeproj" \
+    -scheme "CortexML" \
     -configuration Release \
     -derivedDataPath "$BUILD_DIR" \
     CODE_SIGN_IDENTITY="" \
@@ -57,8 +57,8 @@ if [ ! -d "$APP_SRC" ]; then
     # Re-run without filter to show actual error
     echo "✗ Build failed. Re-running to show errors:"
     xcodebuild \
-        -project "$REPO_ROOT/TxemAI-MLX.xcodeproj" \
-        -scheme "TxemAI-MLX" \
+        -project "$REPO_ROOT/CortexML.xcodeproj" \
+        -scheme "CortexML" \
         -configuration Release \
         -derivedDataPath "$BUILD_DIR" \
         CODE_SIGN_IDENTITY="" \
@@ -118,7 +118,7 @@ echo "  ✓ Layers embedded."
 
 echo ""
 echo "▶ Step 3 — Signing…"
-codesign --force --sign - "$APP_SRC/Contents/MacOS/TxemAI-MLX" 2>/dev/null || true
+codesign --force --sign - "$APP_SRC/Contents/MacOS/CortexML" 2>/dev/null || true
 codesign --force --sign - "$APP_SRC" 2>/dev/null || true
 echo "  ✓ Signed (ad-hoc, dev build)."
 
@@ -132,13 +132,13 @@ rm -rf "$DMG_STAGING"
 mkdir "$DMG_STAGING"
 
 # Use ditto to copy — handles symlinks and resource forks correctly
-ditto "$APP_SRC" "$DMG_STAGING/TxemAI-MLX.app"
+ditto "$APP_SRC" "$DMG_STAGING/CortexML.app"
 ln -s /Applications "$DMG_STAGING/Applications"
 
 rm -f "$DMG_OUT"
 
 hdiutil create \
-    -volname "TxemAI MLX" \
+    -volname "CortexML" \
     -srcfolder "$DMG_STAGING" \
     -ov \
     -format UDZO \
