@@ -1,5 +1,12 @@
 """
-CortexML Voice Server — FastAPI app
+CortexML Voice Server
+Microservidor FastAPI para TTS y STT usando mlx-audio.
+Sin torch — usa el bundle Python de oMLX.
+
+TTS: Qwen3-TTS via mlx-audio
+STT: Whisper via mlx_whisper
+
+Arranque via run_server.py
 """
 
 import io
@@ -13,7 +20,7 @@ from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -26,8 +33,8 @@ def set_data_dir(path: str):
     global _data_dir
     _data_dir = Path(path)
     _data_dir.mkdir(parents=True, exist_ok=True)
-    (profiles_dir()).mkdir(parents=True, exist_ok=True)
-    (audio_dir()).mkdir(parents=True, exist_ok=True)
+    profiles_dir().mkdir(parents=True, exist_ok=True)
+    audio_dir().mkdir(parents=True, exist_ok=True)
 
 def profiles_dir() -> Path:
     return _data_dir / "profiles"
@@ -35,32 +42,83 @@ def profiles_dir() -> Path:
 def audio_dir() -> Path:
     return _data_dir / "audio"
 
+# ── Model repos ───────────────────────────────────────────────────────────────
+
+QWEN_TTS_REPOS = {
+    "0.6B": "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit",
+    "1.7B": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+    "1.7B-voice": "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit",
+}
+
+# Voces disponibles en CustomVoice 0.6B y 1.7B
+QWEN_TTS_VOICES_CUSTOM = [
+    "serena", "vivian", "uncle_fu", "ryan",
+    "aiden", "ono_anna", "sohee", "eric", "dylan",
+]
+
+# Voces disponibles en VoiceDesign 1.7B (descritas por texto)
+QWEN_TTS_VOICES = QWEN_TTS_VOICES_CUSTOM  # default
+
+AVAILABLE_MODELS = [
+    {
+        "model_name": "qwen3-tts-0.6b",
+        "display_name": "Qwen3-TTS 0.6B CustomVoice (Fast, 8bit)",
+        "hf_repo_id": "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit",
+        "type": "tts",
+        "size_mb": 800,
+    },
+    {
+        "model_name": "qwen3-tts-1.7b",
+        "display_name": "Qwen3-TTS 1.7B CustomVoice (High Quality, 8bit)",
+        "hf_repo_id": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+        "type": "tts",
+        "size_mb": 1800,
+    },
+    {
+        "model_name": "qwen3-tts-1.7b-voice",
+        "display_name": "Qwen3-TTS 1.7B VoiceDesign (Voice Cloning, 8bit)",
+        "hf_repo_id": "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit",
+        "type": "tts",
+        "size_mb": 1800,
+    },
+    {
+        "model_name": "whisper-tiny",
+        "display_name": "Whisper Tiny (Fast STT)",
+        "hf_repo_id": "mlx-community/whisper-tiny-mlx",
+        "type": "stt",
+        "size_mb": 75,
+    },
+    {
+        "model_name": "whisper-base",
+        "display_name": "Whisper Base (STT)",
+        "hf_repo_id": "mlx-community/whisper-base-mlx",
+        "type": "stt",
+        "size_mb": 145,
+    },
+    {
+        "model_name": "whisper-large-v3-turbo",
+        "display_name": "Whisper Large v3 Turbo (Best STT)",
+        "hf_repo_id": "mlx-community/whisper-large-v3-turbo-asr-fp16",
+        "type": "stt",
+        "size_mb": 1550,
+    },
+]
+
 # ── Lazy model cache ──────────────────────────────────────────────────────────
 
 _tts_model = None
 _tts_model_size = None
-_stt_model = None
-_stt_model_size = None
 
 def get_tts_model(model_size: str = "1.7B"):
     global _tts_model, _tts_model_size
     if _tts_model is None or _tts_model_size != model_size:
         logger.info(f"Loading Qwen3-TTS {model_size}...")
-        from mlx_audio.tts.models.qwen import load as load_qwen
-        _tts_model = load_qwen(model_size)
+        from mlx_audio.tts.utils import load_model
+        repo_id = QWEN_TTS_REPOS.get(model_size, QWEN_TTS_REPOS["1.7B"])
+        _tts_model = load_model(repo_id)
         _tts_model_size = model_size
-        logger.info(f"Qwen3-TTS {model_size} loaded.")
+        logger.info(f"Qwen3-TTS {model_size} loaded. sample_rate={_tts_model.sample_rate}")
     return _tts_model
-
-def get_stt_model(model_size: str = "base"):
-    global _stt_model, _stt_model_size
-    if _stt_model is None or _stt_model_size != model_size:
-        logger.info(f"Loading Whisper {model_size}...")
-        from mlx_audio.stt.models.whisper import load as load_whisper
-        _stt_model = load_whisper(model_size)
-        _stt_model_size = model_size
-        logger.info(f"Whisper {model_size} loaded.")
-    return _stt_model
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
@@ -76,9 +134,9 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     set_data_dir(str(_data_dir))
-    logger.info(f"Voice server data dir: {_data_dir}")
+    logger.info(f"Voice server ready. Data dir: {_data_dir}")
 
-# ── Models ────────────────────────────────────────────────────────────────────
+# ── Pydantic models ───────────────────────────────────────────────────────────
 
 class VoiceProfile(BaseModel):
     id: str
@@ -86,9 +144,17 @@ class VoiceProfile(BaseModel):
     language: str = "en"
     engine: str = "qwen"
     model_size: str = "1.7B"
+    voice: str = "serena"         # voz builtin de Qwen3-TTS CustomVoice
     effects_chain: list = []
     ref_audio_path: Optional[str] = None
     ref_text: Optional[str] = None
+
+class ProfileCreate(BaseModel):
+    name: str
+    language: str = "en"
+    engine: str = "qwen"
+    model_size: str = "1.7B"
+    voice: str = "serena"
 
 class GenerateRequest(BaseModel):
     text: str
@@ -97,12 +163,6 @@ class GenerateRequest(BaseModel):
     model_size: str = "1.7B"
     speed: float = 1.0
     effects_chain: list = []
-
-class ProfileCreate(BaseModel):
-    name: str
-    language: str = "en"
-    engine: str = "qwen"
-    model_size: str = "1.7B"
 
 class EffectsUpdate(BaseModel):
     effects_chain: list
@@ -146,6 +206,7 @@ async def create_profile(data: ProfileCreate) -> VoiceProfile:
         language=data.language,
         engine=data.engine,
         model_size=data.model_size,
+        voice=data.voice,
     )
     _save_profile(profile)
     return profile
@@ -175,7 +236,7 @@ async def upload_sample(
     file: UploadFile = File(...),
     reference_text: str = Form(""),
 ):
-    """Upload a reference audio sample for voice cloning."""
+    """Upload reference audio for voice cloning."""
     profile = _load_profile(profile_id)
     sample_dir = profiles_dir() / profile_id
     sample_dir.mkdir(exist_ok=True)
@@ -193,44 +254,51 @@ async def upload_sample(
 
 @app.post("/generate/stream")
 async def generate_stream(data: GenerateRequest):
-    """Generate speech and return WAV audio directly."""
+    """Generate speech and return WAV audio."""
     profile = _load_profile(data.profile_id)
 
     try:
         model = get_tts_model(profile.model_size)
+        sample_rate = model.sample_rate
 
-        # Build voice prompt from reference audio if available
-        voice_prompt = None
-        if profile.ref_audio_path and Path(profile.ref_audio_path).exists():
-            voice_prompt = profile.ref_audio_path
-
-        import mlx.core as mx
         import numpy as np
         import soundfile as sf
 
-        logger.info(f"Generating TTS: '{data.text[:50]}...' lang={data.language}")
-
-        # Generate audio
-        audio, sample_rate = model.generate(
+        # Parámetros de generación
+        gen_kwargs = dict(
             text=data.text,
-            voice=voice_prompt,
-            language=data.language,
+            lang_code=data.language,
             speed=data.speed,
+            stream=False,
+            verbose=False,
         )
 
-        # Convert to numpy if needed
-        if hasattr(audio, 'tolist'):
-            audio = np.array(audio)
+        # Voz: usar ref_audio (clonación) o voz builtin
+        if profile.ref_audio_path and Path(profile.ref_audio_path).exists():
+            gen_kwargs["ref_audio"] = profile.ref_audio_path
+            if profile.ref_text:
+                gen_kwargs["ref_text"] = profile.ref_text
+        else:
+            gen_kwargs["voice"] = profile.voice
 
-        # Apply effects if any
-        if data.effects_chain or profile.effects_chain:
-            chain = data.effects_chain or profile.effects_chain
-            audio = _apply_effects(audio, sample_rate, chain)
+        logger.info(f"Generating TTS: '{data.text[:60]}' voice={gen_kwargs.get('voice', 'cloned')}")
 
-        # Write to WAV bytes
+        audio_chunks = []
+        for result in model.generate(**gen_kwargs):
+            audio_chunks.append(np.array(result.audio))
+            sample_rate = result.sample_rate
+
+        if not audio_chunks:
+            raise ValueError("No audio generated")
+
+        audio = np.concatenate(audio_chunks) if len(audio_chunks) > 1 else audio_chunks[0]
+
+        # WAV bytes
         buf = io.BytesIO()
         sf.write(buf, audio, sample_rate, format="WAV")
         wav_bytes = buf.getvalue()
+
+        logger.info(f"TTS done: {len(audio)/sample_rate:.1f}s audio, {len(wav_bytes)} bytes")
 
         return Response(
             content=wav_bytes,
@@ -240,35 +308,8 @@ async def generate_stream(data: GenerateRequest):
 
     except Exception as e:
         logger.error(f"TTS generation failed: {e}")
+        import traceback; traceback.print_exc()
         raise HTTPException(500, str(e))
-
-def _apply_effects(audio, sample_rate: int, effects_chain: list):
-    """Apply audio effects chain."""
-    try:
-        import numpy as np
-        from pedalboard import Pedalboard, Reverb, Chorus, Compressor, LowShelfFilter, HighShelfFilter
-        import pedalboard
-
-        board_effects = []
-        for effect in effects_chain:
-            etype = effect.get("type", "")
-            params = effect.get("params", {})
-            if etype == "reverb":
-                board_effects.append(Reverb(room_size=params.get("room_size", 0.3)))
-            elif etype == "chorus":
-                board_effects.append(Chorus())
-            elif etype == "compressor":
-                board_effects.append(Compressor())
-
-        if board_effects:
-            board = Pedalboard(board_effects)
-            audio = board(audio.astype(np.float32), sample_rate)
-    except ImportError:
-        pass  # pedalboard not available, skip effects
-    except Exception as e:
-        logger.warning(f"Effects failed: {e}")
-
-    return audio
 
 # ── STT Transcription ─────────────────────────────────────────────────────────
 
@@ -278,16 +319,30 @@ async def transcribe(
     language: Optional[str] = Form(None),
     model: Optional[str] = Form("base"),
 ):
-    """Transcribe audio to text using Whisper via mlx-audio."""
+    """Transcribe audio to text using Whisper via mlx_whisper."""
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
 
     try:
-        stt = get_stt_model(model or "base")
-        result = stt.transcribe(tmp_path, language=language)
-        text = result.get("text", "").strip() if isinstance(result, dict) else str(result).strip()
+        import mlx_whisper
+
+        model_map = {
+            "tiny": "mlx-community/whisper-tiny-mlx",
+            "base": "mlx-community/whisper-base-mlx",
+            "small": "mlx-community/whisper-small-mlx",
+            "large": "mlx-community/whisper-large-v3-turbo-asr-fp16",
+        }
+        model_path = model_map.get(model or "base", model_map["base"])
+
+        result = mlx_whisper.transcribe(
+            tmp_path,
+            path_or_hf_repo=model_path,
+            language=language,
+        )
+        text = result.get("text", "").strip()
         return {"text": text, "duration": 0.0}
+
     except Exception as e:
         logger.error(f"Transcription failed: {e}")
         raise HTTPException(500, str(e))
@@ -295,51 +350,6 @@ async def transcribe(
         Path(tmp_path).unlink(missing_ok=True)
 
 # ── Model status ──────────────────────────────────────────────────────────────
-
-AVAILABLE_MODELS = [
-    {
-        "model_name": "qwen3-tts-0.6b",
-        "display_name": "Qwen3-TTS 0.6B (Fast)",
-        "hf_repo_id": "Qwen/Qwen3-TTS-0.6B",
-        "type": "tts",
-        "size_mb": 1200,
-    },
-    {
-        "model_name": "qwen3-tts-1.7b",
-        "display_name": "Qwen3-TTS 1.7B (High Quality)",
-        "hf_repo_id": "Qwen/Qwen3-TTS-1.7B",
-        "type": "tts",
-        "size_mb": 3400,
-    },
-    {
-        "model_name": "whisper-tiny",
-        "display_name": "Whisper Tiny (Fast STT)",
-        "hf_repo_id": "openai/whisper-tiny",
-        "type": "stt",
-        "size_mb": 75,
-    },
-    {
-        "model_name": "whisper-base",
-        "display_name": "Whisper Base (STT)",
-        "hf_repo_id": "openai/whisper-base",
-        "type": "stt",
-        "size_mb": 145,
-    },
-    {
-        "model_name": "whisper-small",
-        "display_name": "Whisper Small (Better STT)",
-        "hf_repo_id": "openai/whisper-small",
-        "type": "stt",
-        "size_mb": 460,
-    },
-    {
-        "model_name": "whisper-large-v3-turbo",
-        "display_name": "Whisper Large v3 Turbo (Best STT)",
-        "hf_repo_id": "openai/whisper-large-v3-turbo",
-        "type": "stt",
-        "size_mb": 1550,
-    },
-]
 
 @app.get("/models/status")
 async def model_status():
@@ -351,25 +361,32 @@ async def model_status():
         repo_dir = cache_dir / ("models--" + m["hf_repo_id"].replace("/", "--"))
         downloaded = repo_dir.exists() and any(repo_dir.rglob("*.safetensors"))
         loaded = (
-            (_tts_model is not None and m["type"] == "tts") or
-            (_stt_model is not None and m["type"] == "stt")
+            (_tts_model is not None and m["type"] == "tts" and _tts_model_size in m["model_name"]) or
+            (m["type"] == "stt" and False)  # STT se carga on-demand
         )
-        result.append({
-            **m,
-            "downloaded": downloaded,
-            "loaded": loaded,
-            "downloading": False,
-        })
+        result.append({**m, "downloaded": downloaded, "loaded": loaded, "downloading": False})
     return {"models": result}
+
+# ── Voices list ───────────────────────────────────────────────────────────────
+
+@app.get("/voices")
+async def list_voices():
+    """List available builtin voices for Qwen3-TTS."""
+    return {
+        "voices": [
+            {"id": v, "name": v, "engine": "qwen3-tts"}
+            for v in QWEN_TTS_VOICES
+        ]
+    }
+
+# ── Effects ───────────────────────────────────────────────────────────────────
 
 @app.get("/effects/available")
 async def available_effects():
-    """List available audio effects."""
     return {
         "effects": [
             {"type": "reverb", "name": "Reverb", "params": {"room_size": {"min": 0.0, "max": 1.0, "default": 0.3}}},
             {"type": "chorus", "name": "Chorus", "params": {}},
             {"type": "compressor", "name": "Compressor", "params": {}},
-            {"type": "speed", "name": "Speed", "params": {"factor": {"min": 0.5, "max": 2.0, "default": 1.0}}},
         ]
     }
