@@ -9,6 +9,7 @@ STT: Whisper via mlx_whisper
 Arranque via run_server.py
 """
 
+import asyncio
 import io
 import json
 import logging
@@ -104,6 +105,61 @@ AVAILABLE_MODELS = [
     },
 ]
 
+# ── Download management ───────────────────────────────────────────────────────
+
+_downloads: dict[str, dict] = {}  # {model_name: {"status": ..., "progress": float, ...}}
+
+def _start_download(model_name: str) -> str:
+    """Inicia descarga en background y devuelve download_id."""
+    download_id = str(uuid.uuid4())
+    
+    # Guardar estado inicial
+    _downloads[model_name] = {
+        "download_id": download_id,
+        "status": "started",
+        "progress": 0.0,
+    }
+
+    async def _download_task():
+        try:
+            repo_id = None
+            for m in AVAILABLE_MODELS:
+                if m["model_name"] == model_name:
+                    repo_id = m["hf_repo_id"]
+                    break
+            if not repo_id:
+                raise ValueError(f"Model {model_name} not found in AVAILABLE_MODELS")
+
+            from huggingface_hub import constants as hf_constants
+            cache_dir = Path(hf_constants.HF_HUB_CACHE)
+
+            # Descargar con callback de progreso
+            def _progress_hook(current: int, total: int):
+                progress = current / total if total > 0 else 1.0
+                _downloads[model_name]["progress"] = progress
+                if current == total:
+                    _downloads[model_name]["status"] = "completed"
+                    _downloads[model_name]["progress"] = 1.0
+
+            from huggingface_hub import snapshot_download
+            snapshot_download(
+                repo_id=repo_id,
+                cache_dir=str(cache_dir),
+                max_workers=1,  # para controlar progreso
+            )
+        except Exception as e:
+            _downloads[model_name]["status"] = "failed"
+            _downloads[model_name]["error"] = str(e)
+        finally:
+            # Limpiar si falló o completado
+            if _downloads[model_name]["status"] in ("completed", "failed"):
+                del _downloads[model_name]
+
+    # Ejecutar en background
+    asyncio.create_task(_download_task())
+    
+    return download_id
+
 # ── Lazy model cache ──────────────────────────────────────────────────────────
 
 _tts_model = None
@@ -160,6 +216,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.post("/models/{name}/download")
+async def download_model(name: str):
+    """Inicia descarga de un modelo en background."""
+    # Validar que el modelo existe
+    model_info = next((m for m in AVAILABLE_MODELS if m["model_name"] == name), None)
+    if not model_info:
+        raise HTTPException(status_code=404, detail=f"Model '{name}' not found")
+
+    # Si ya está descargado, no hacer nada
+    if _is_model_downloaded(name):
+        return {"status": "already_downloaded", "download_id": None}
+
+    # Si ya hay descarga en curso, devolver su ID
+    if name in _downloads and _downloads[name]["status"] == "started":
+        return {"status": "already_downloading", "download_id": _downloads[name]["download_id"]}
+
+    # Iniciar descarga
+    download_id = _start_download(name)
+    return {"status": "started", "download_id": download_id}
 
 @app.on_event("startup")
 async def startup():
