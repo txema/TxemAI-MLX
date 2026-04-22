@@ -5,6 +5,7 @@ import AVFoundation
 
 struct VoiceStudioView: View {
     @ObservedObject private var voiceManager = VoiceManager.shared
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.cortexTheme) private var t
 
     @State private var selectedProfile: VoiceProfile?
@@ -32,10 +33,28 @@ struct VoiceStudioView: View {
     private let modelSizes = ["0.6B", "1.7B"]
 
     var body: some View {
-        HStack(spacing: 0) {
-            leftPanel
-            Rectangle().fill(t.bd).frame(width: 1)
-            rightPanel
+        VStack(spacing: 0) {
+            HStack {
+                Text("Voice Studio")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.system(size: 16))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            HStack(spacing: 0) {
+                leftPanel
+                Rectangle().fill(t.bd).frame(width: 1)
+                rightPanel
+            }
         }
         .background(t.win)
         .task { await loadData() }
@@ -431,6 +450,10 @@ struct VoiceStudioView: View {
 
     private var newProfileSheet: some View {
         NewVoiceProfileSheet { profile in
+            guard case .running = voiceManager.state else {
+                errorMessage = "Voice server is not running. Start it first."
+                return
+            }
             Task {
                 do {
                     let created = try await VoiceAPIClient.shared.createProfile(profile)

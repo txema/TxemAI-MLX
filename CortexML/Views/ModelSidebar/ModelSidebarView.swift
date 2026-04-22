@@ -78,16 +78,16 @@ struct ModelCardView: View {
                     Text(model.name)
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(t.t1)
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .truncationMode(.tail)
-                        .frame(maxWidth: 104, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     if let alias = model.modelAlias {
                         Text(alias)
                             .font(.system(size: 9.5))
                             .foregroundStyle(t.t4)
-                            .lineLimit(1)
+                            .lineLimit(2)
                             .truncationMode(.tail)
-                            .frame(maxWidth: 110, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 Spacer(minLength: 0)
