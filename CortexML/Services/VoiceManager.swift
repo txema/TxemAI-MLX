@@ -59,13 +59,16 @@ final class VoiceManager: ObservableObject {
             break
         }
 
+        startupLog = ["Looking for voice server script..."]
         guard let scriptURL = resolveServerScript() else {
-            state = .error(VoiceServerError.scriptNotFound.errorDescription!)
+            let msg = "start_voice_server.sh not found"
+            startupLog = [msg]
+            state = .error(msg)
             throw VoiceServerError.scriptNotFound
         }
+        startupLog = ["Script found: \(scriptURL.path)", "Launching..."]
 
-        state      = .starting(progress: "Launching voicebox…")
-        startupLog = []
+        state = .starting(progress: "Launching voicebox…")
 
         let dataDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cortexML/voice").path
@@ -160,12 +163,34 @@ final class VoiceManager: ObservableObject {
     }
 
     private func resolveServerScript() -> URL? {
+        // 1. Producción: dentro del bundle
         if let url = Bundle.main.url(forResource: "start_voice_server", withExtension: "sh") {
             return url
         }
-        let devURL = URL(fileURLWithPath:
-            "/Users/txema/Projects/IA/TxemAI-MLX/backend-wrapper/start_voice_server.sh")
-        return FileManager.default.fileExists(atPath: devURL.path) ? devURL : nil
+
+        // 2. Dev: path absoluto hardcodeado
+        let devPath = "/Users/txema/Projects/IA/TxemAI-MLX/backend-wrapper/start_voice_server.sh"
+        let devURL = URL(fileURLWithPath: devPath)
+        if FileManager.default.fileExists(atPath: devURL.path) {
+            return devURL
+        }
+
+        // 3. Dev alternativo: relativo al ejecutable
+        if let execURL = Bundle.main.executableURL {
+            let candidate = execURL
+                .deletingLastPathComponent() // MacOS/
+                .deletingLastPathComponent() // Contents/
+                .deletingLastPathComponent() // .app/
+                .deletingLastPathComponent() // Debug/ o Release/
+                .deletingLastPathComponent() // Products/
+                .deletingLastPathComponent() // Build/
+                .appendingPathComponent("backend-wrapper/start_voice_server.sh")
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+
+        return nil
     }
 }
 

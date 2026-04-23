@@ -200,7 +200,7 @@ struct GlobalSettingsView: View {
             if !serverManager.startupLog.isEmpty {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
-                        ForEach(serverManager.startupLog.suffix(8), id: \.self) { line in
+                        ForEach(Array(serverManager.startupLog.suffix(8).enumerated()), id: \.offset) { _, line in
                             Text(line)
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(.secondary)
