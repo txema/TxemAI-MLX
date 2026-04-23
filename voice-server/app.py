@@ -167,20 +167,20 @@ _tts_model = None
 _tts_model_size = None
 
 def _is_model_downloaded(model_name: str) -> bool:
-    """Verifica si un modelo está descargado en la caché."""
+    """Verifica si un modelo está descargado en la caché HuggingFace."""
     from huggingface_hub import constants as hf_constants
     cache_dir = Path(hf_constants.HF_HUB_CACHE)
-    repo_id = None
-    
+
+    hf_repo_id = None
     for m in AVAILABLE_MODELS:
         if m["model_name"] == model_name:
-            repo_id = m["hf_repo_id"]
+            hf_repo_id = m["hf_repo_id"]
             break
-    
-    if not repo_id:
+
+    if not hf_repo_id:
         return False
-        
-    repo_dir = cache_dir / ("models--" + repo_id.replace("/", "--"))
+
+    repo_dir = cache_dir / ("models--" + hf_repo_id.replace("/", "--"))
     return repo_dir.exists() and any(repo_dir.rglob("*.safetensors"))
 
 def _model_name_for_size(model_size: str) -> str:

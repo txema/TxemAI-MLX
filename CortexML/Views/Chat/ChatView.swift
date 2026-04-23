@@ -1221,7 +1221,7 @@ struct ChatBubble: View {
                         )
                 }
                 if !message.textAttachmentNames.isEmpty {
-                    ForEach(message.textAttachmentNames, id: \.self) { name in
+                    ForEach(Array(message.textAttachmentNames.enumerated()), id: \.offset) { _, name in
                         Label(name, systemImage: "doc.text")
                             .font(.system(size: 10.5))
                             .foregroundStyle(t.t3)
