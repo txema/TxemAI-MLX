@@ -71,25 +71,10 @@ struct VoiceStudioView: View {
                 Task { await loadData() }
             }
         }
-        .sheet(isPresented: $showNewProfileSheet) {
-        NewVoiceProfileSheet { profile in
-            guard case .running = voiceManager.state else {
-                errorMessage = "Voice server is not running. Start it first."
-                return
-            }
-            Task {
-                do {
-                    let created = try await VoiceAPIClient.shared.createProfile(profile)
-                    profiles.append(created)
-                    selectedProfile = created
-                    showNewProfileSheet = false
-                } catch {
-                    errorMessage = error.localizedDescription
-                }
-            }
-        }
-    }
-        .alert("Voice Error", isPresented: .constant(errorMessage != nil), actions: {
+        .alert("Voice Error", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        ), actions: {
             Button("OK") { errorMessage = nil }
         }, message: {
             Text(errorMessage ?? "")
@@ -137,6 +122,24 @@ struct VoiceStudioView: View {
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
+            .popover(isPresented: $showNewProfileSheet, arrowEdge: .top) {
+                NewVoiceProfileSheet { profile in
+                    guard case .running = voiceManager.state else {
+                        errorMessage = "Voice server is not running. Start it first."
+                        return
+                    }
+                    Task {
+                        do {
+                            let created = try await VoiceAPIClient.shared.createProfile(profile)
+                            profiles.append(created)
+                            selectedProfile = created
+                            showNewProfileSheet = false
+                        } catch {
+                            errorMessage = error.localizedDescription
+                        }
+                    }
+                }
+            }
         }
         .frame(width: 220)
         .background(t.side)
