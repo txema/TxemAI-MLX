@@ -48,7 +48,7 @@ struct VoiceStudioView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
 
-            Divider()
+            Divider()   
 
             HStack(spacing: 0) {
                 leftPanel
@@ -57,7 +57,20 @@ struct VoiceStudioView: View {
             }
         }
         .background(t.win)
-        .task { await loadData() }
+        .task {
+            for _ in 0..<30 {
+                if case .running = voiceManager.state {
+                    await loadData()
+                    return
+                }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        .onChange(of: voiceManager.state) { _, newState in
+            if case .running = newState {
+                Task { await loadData() }
+            }
+        }
         .sheet(isPresented: $showNewProfileSheet) {
         NewVoiceProfileSheet { profile in
             guard case .running = voiceManager.state else {
@@ -526,7 +539,11 @@ struct VoiceStudioView: View {
     }
 
     private func loadProfiles() async {
-        do { profiles = try await VoiceAPIClient.shared.fetchProfiles() } catch {}
+        do {
+            profiles = try await VoiceAPIClient.shared.fetchProfiles()
+        } catch {
+            profiles = []
+        }
     }
 
     private func loadAvailableEffects() async {
