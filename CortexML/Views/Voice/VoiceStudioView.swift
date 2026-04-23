@@ -410,7 +410,7 @@ struct VoiceStudioView: View {
                 sectionHeader("MODELS")
                 Spacer()
                 Button {
-                    Task { await loadModelStatuses() }
+                    Task { await loadData() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11))
@@ -532,28 +532,26 @@ struct VoiceStudioView: View {
     // MARK: - Actions
 
     private func loadData() async {
-        async let p: Void = loadProfiles()
-        async let e: Void = loadAvailableEffects()
-        async let m: Void = loadModelStatuses()
-        _ = await (p, e, m)
-    }
-
-    private func loadProfiles() async {
-        do {
-            profiles = try await VoiceAPIClient.shared.fetchProfiles()
-        } catch {
-            profiles = []
+        for attempt in 0..<5 {
+            if attempt > 0 {
+                try? await Task.sleep(for: .seconds(1))
+            }
+            do {
+                async let p = VoiceAPIClient.shared.fetchProfiles()
+                async let m = VoiceAPIClient.shared.fetchModelStatus()
+                async let e = VoiceAPIClient.shared.fetchAvailableEffects()
+                let (fetchedProfiles, fetchedModels, fetchedEffects) = try await (p, m, e)
+                self.profiles = fetchedProfiles
+                self.modelStatuses = fetchedModels
+                self.availableEffects = fetchedEffects
+                return
+            } catch {
+                if attempt == 4 {
+                    profiles = []
+                    modelStatuses = []
+                }
+            }
         }
-    }
-
-    private func loadAvailableEffects() async {
-        guard case .running = voiceManager.state else { return }
-        do { availableEffects = try await VoiceAPIClient.shared.fetchAvailableEffects() } catch {}
-    }
-
-    private func loadModelStatuses() async {
-        guard case .running = voiceManager.state else { return }
-        do { modelStatuses = try await VoiceAPIClient.shared.fetchModelStatus() } catch {}
     }
 
     private func generateSpeech() async {
@@ -647,7 +645,7 @@ struct VoiceStudioView: View {
         defer { isDownloadingModel = nil }
         do {
             try await VoiceAPIClient.shared.downloadModel(name: name)
-            await loadModelStatuses()
+            await loadData()
         } catch {
             errorMessage = error.localizedDescription
         }
