@@ -50,11 +50,11 @@ struct ThroughputChartView: View {
 
             // X-axis labels
             HStack {
-                ForEach(xLabels, id: \.self) { lbl in
+                ForEach(Array(xLabels.enumerated()), id: \.offset) { idx, lbl in
                     Text(lbl)
                         .font(.system(size: 8.5).monospacedDigit())
                         .foregroundStyle(t.t5)
-                    if lbl != xLabels.last { Spacer() }
+                    if idx < xLabels.count - 1 { Spacer() }
                 }
             }
             .padding(.horizontal, 14)
